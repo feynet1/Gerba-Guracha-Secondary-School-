@@ -1,0 +1,21 @@
+# Environment and deployment files
+.env
+.env.local
+.env.*.local
+.firebase/
+
+# Dependencies
+node_modules/
+dist/
+functions/node_modules/
+
+# Build output
+.vite/
+coverage/
+
+# OS and editor files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
