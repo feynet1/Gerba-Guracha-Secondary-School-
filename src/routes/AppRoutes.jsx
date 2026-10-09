@@ -28,6 +28,19 @@ import ClassesPage, {
   ParentDetailsPage,
   ParentsPage,
 } from '../pages/management/ClassesParentsPages';
+import {
+  MyTeacherProfilePage,
+  SubjectDetailsPage,
+  SubjectFormPage,
+  SubjectsPage,
+  TeacherAssignmentsPage,
+  TeacherDetailsPage,
+  TeacherFormPage,
+  TeachersPage,
+  TimetableEntryFormPage,
+  TimetablePage,
+  TimetableSettingsPage,
+} from '../pages/phase3/Phase3Pages';
 
 function RootRedirect() {
   const { isAuthenticated, role, loading } = useAuth();
@@ -112,6 +125,74 @@ function AppRoutes() {
           <Route
             path="/parent/children"
             element={<RoleRoute allowedRoles={['parent']}><ParentChildrenPage /></RoleRoute>}
+          />
+          <Route
+            path="/teachers"
+            element={<RoleRoute allowedRoles={['admin', 'director']}><TeachersPage /></RoleRoute>}
+          />
+          <Route
+            path="/teachers/new"
+            element={<RoleRoute allowedRoles={['admin']}><TeacherFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/teachers/:teacherId"
+            element={<RoleRoute allowedRoles={['admin', 'director']}><TeacherDetailsPage /></RoleRoute>}
+          />
+          <Route
+            path="/teachers/:teacherId/edit"
+            element={<RoleRoute allowedRoles={['admin']}><TeacherFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/teacher/profile"
+            element={<RoleRoute allowedRoles={['teacher']}><MyTeacherProfilePage /></RoleRoute>}
+          />
+          <Route
+            path="/subjects"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><SubjectsPage /></RoleRoute>}
+          />
+          <Route
+            path="/subjects/new"
+            element={<RoleRoute allowedRoles={['admin']}><SubjectFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/subjects/:subjectId"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><SubjectDetailsPage /></RoleRoute>}
+          />
+          <Route
+            path="/subjects/:subjectId/edit"
+            element={<RoleRoute allowedRoles={['admin']}><SubjectFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/teacher-assignments/new"
+            element={<RoleRoute allowedRoles={['admin']}><TeacherAssignmentsPage /></RoleRoute>}
+          />
+          <Route
+            path="/teacher-assignments"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><TeacherAssignmentsPage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable/settings"
+            element={<RoleRoute allowedRoles={['admin']}><TimetableSettingsPage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable/new"
+            element={<RoleRoute allowedRoles={['admin']}><TimetableEntryFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable/classes/:classId"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><TimetablePage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable/teachers/:teacherId"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><TimetablePage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable/:entryId/edit"
+            element={<RoleRoute allowedRoles={['admin']}><TimetableEntryFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/timetable"
+            element={<RoleRoute allowedRoles={['admin', 'director', 'teacher']}><TimetablePage /></RoleRoute>}
           />
 
           <Route

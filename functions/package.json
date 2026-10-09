@@ -7,7 +7,7 @@
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "lint": "eslint .",
-    "test": "echo \"No function tests configured yet\""
+    "test": "node --test test/phase3Validation.node.cjs"
   },
   "engines": {
     "node": "22"

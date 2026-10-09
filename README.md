@@ -197,7 +197,71 @@ No new frontend environment variables or private credentials are required. The e
 
 The Phase 2 UI uses English and Afaan Oromo translations and responsive Material UI forms/lists. Run `npm.cmd run build`, `npm.cmd run lint`, and `npm.cmd test` on Windows PowerShell systems where script execution policy blocks the `npm.ps1` shim. Firebase Emulator integration/security tests still need to be run against a configured emulator/project before production data is used.
 
-Not included in Phase 2: attendance, teacher-to-class assignment, subjects, timetables, marks/results, reporting, SMS, and Ethiopian calendar conversion. Teacher assignments and academic activities are planned for Phase 3.
+Not included in Phase 2: attendance, marks/results, reporting, SMS, and Ethiopian calendar conversion.
+
+## Phase 3 Staff, Subjects, Assignments, and Timetable
+
+### Firestore collections
+
+- `teachers/{teacherId}` stores a staff profile and optional link to an existing Auth user. Passwords are never stored. `employeeIds/{sha256}` is a server-only lock for employee ID uniqueness. Lowercase search fields support bounded prefix lookups.
+- `subjects/{subjectId}` stores a unique code, configurable grade and stream applicability, periods per week, active state, and audit fields. `subjectCodes/{sha256}` enforces unique codes.
+- `teacherAssignments/{assignmentId}` is the authoritative teacher/class/subject/year relationship. `teacherAssignmentKeys/{sha256}` prevents duplicate active assignments. `assignmentScheduleUsage/{assignmentId}` transactionally caps scheduled timetable entries at the assignment weekly period count.
+- `schoolSettings/timetable` stores the configured academic year, school days, non-overlapping periods and breaks, optional rooms, time zone, optional daily class limit, and active schedule count. Periods use stable IDs and 24-hour `HH:MM` times.
+- `timetable/{entryId}` stores a scheduled lesson referencing an active assignment. It records IDs, academic year, configured day/period/time, optional room, active state, and audit fields.
+- `timetableSlotLocks/{sha256}` stores active reservations by resource/day/year. Transactions read and update class, teacher, and optional room lock documents so overlapping schedules cannot both commit. Half-open interval overlap uses `newStart < oldEnd && newEnd > oldStart`.
+
+Grades 9 and 10 use the Phase 2 `stream: null` class convention. Grades 11 and 12 use `natural` or `social`. Subject applicability for lower grades is grade-based; stream applicability is enforced for upper grades. Assignments and timetable entries must match the class academic year and configured period times. Break periods cannot be scheduled. Timetable settings cannot change while active lessons exist; deactivate entries first.
+
+### Routes and access
+
+- `/teachers`, `/teachers/new`, `/teachers/:teacherId`, `/teachers/:teacherId/edit`, `/teacher/profile`
+- `/subjects`, `/subjects/new`, `/subjects/:subjectId`, `/subjects/:subjectId/edit`
+- `/teacher-assignments`, `/teacher-assignments/new`
+- `/timetable`, `/timetable/classes/:classId`, `/timetable/teachers/:teacherId`, `/timetable/new`, `/timetable/:entryId/edit`, `/timetable/settings`
+
+Admin manages staff, subjects, assignments, and timetable settings/entries. Director has read-only access to staff (without contact fields), subjects, assignments, and timetables. A teacher can read their own linked profile/assignments/timetable and shared subject information; teachers cannot edit employment or assign themselves. Registrar, student, and parent have no Phase 3 staff/assignment/timetable access.
+
+Teacher linking uses an existing Auth UID and verifies its `teacher` custom claim; it never creates an Auth account. Teacher and subject deactivation preserves historical assignment and timetable documents. New assignments require active teacher/class/subject records. Existing schedule entries must be explicitly deactivated before settings are changed.
+
+### Cloud Functions
+
+Phase 3 adds `createTeacher`, `updateTeacher`, `linkTeacherAccount`, `getTeacher`, `listTeachers`, `getMyTeacherProfile`; `createSubject`, `updateSubject`, `getSubject`, `listSubjects`; `createTeacherAssignment`, `updateTeacherAssignment`, `listTeacherAssignments`; `getTimetableSettings`, `saveTimetableSettings`; and `createTimetableEntry`, `updateTimetableEntry`, `getTimetableEntry`, `deactivateTimetableEntry`, `listTimetable`. Admin SDK writes validate claims, references, status, assignment compatibility, configured periods and rooms, and are protected by transactional unique-key and slot-lock documents.
+
+### Indexes, configuration, and deployment
+
+The required composite indexes for staff status, subject applicability, assignments, and class/teacher timetables are in `firestore.indexes.json`. Firebase may provide an additional index link if a newly introduced filter combination requires another composite index.
+
+Before creating assignments or timetable entries, sign in as an administrator and open **Timetable settings**. Configure the school's academic year exactly as recorded on the Phase 2 classes, select its school days, add each period and break with unique IDs and non-overlapping 24-hour start/end times, optionally enable and list rooms, and set the `Africa/Addis_Ababa` time zone or the school's actual IANA zone. There are no hard-coded production periods or curriculum subjects.
+
+Run frontend and Functions validation:
+
+```bash
+npm run lint
+npm run test
+npm run build
+cd functions
+npm test
+```
+
+Deploy rules, indexes, and Functions (no Firebase Hosting):
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes,functions
+```
+
+The frontend uses the existing six `VITE_FIREBASE_*` variables. Phase 3 needs no private client credentials.
+
+### Phase 3 verification
+
+`functions/test/phase3Validation.node.cjs` covers supported grades/streams, subject applicability, time parsing and interval overlap, period uniqueness/overlap, and timetable settings/room constraints. Run the Firestore Rules role checks against a demo project (never production) from the repository root:
+
+```bash
+firebase emulators:exec --only auth,firestore --project demo-phase3 "node functions/test/phase3RulesEmulator.cjs"
+```
+
+The validation suite passes 7 Node tests, and the Rules emulator test checks 16 role/access cases across admin, director, registrar, teacher, student, parent, and unauthenticated requests.
+
+Phase 4 can add attendance and other academic activity workflows, using these teacher assignments and timetable records as their authorization and schedule foundation.
 
 ## Phase 1 Scope
 

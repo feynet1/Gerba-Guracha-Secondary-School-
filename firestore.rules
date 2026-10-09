@@ -17,6 +17,14 @@ service cloud.firestore {
       return hasRole(['admin', 'registrar', 'director']);
     }
 
+    function canReadPhase3Administration() {
+      return hasRole(['admin', 'director']);
+    }
+
+    function isTeacher() {
+      return hasRole(['teacher']);
+    }
+
     function isOwner(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
@@ -59,6 +67,63 @@ service cloud.firestore {
     }
 
     match /accountLinks/{userId} {
+      allow read, write: if false;
+    }
+
+    match /teachers/{teacherId} {
+      allow get: if canReadPhase3Administration()
+        || (isTeacher() && resource.data.userId == request.auth.uid);
+      allow list: if canReadPhase3Administration();
+      allow create, update, delete: if false;
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if hasRole(['admin', 'director', 'teacher']);
+      allow create, update, delete: if false;
+    }
+
+    match /teacherAssignments/{assignmentId} {
+      allow get: if canReadPhase3Administration()
+        || (isTeacher()
+          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
+          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
+      allow list: if canReadPhase3Administration()
+        || (isTeacher()
+          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
+          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
+      allow create, update, delete: if false;
+    }
+
+    match /timetable/{entryId} {
+      allow get, list: if canReadPhase3Administration()
+        || (isTeacher()
+          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
+          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
+      allow create, update, delete: if false;
+    }
+
+    match /schoolSettings/{settingsId} {
+      allow read: if hasRole(['admin', 'director', 'teacher']);
+      allow create, update, delete: if false;
+    }
+
+    match /employeeIds/{employeeKey} {
+      allow read, write: if false;
+    }
+
+    match /subjectCodes/{subjectKey} {
+      allow read, write: if false;
+    }
+
+    match /teacherAssignmentKeys/{assignmentKey} {
+      allow read, write: if false;
+    }
+
+    match /timetableSlotLocks/{slotKey} {
+      allow read, write: if false;
+    }
+
+    match /assignmentScheduleUsage/{assignmentId} {
       allow read, write: if false;
     }
 

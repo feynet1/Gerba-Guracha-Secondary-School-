@@ -715,3 +715,5 @@ exports.linkParentAccount = onCall(async (request) => {
   });
   return { success: true };
 });
+
+Object.assign(exports, require('./phase3'));

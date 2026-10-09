@@ -51,6 +51,20 @@ function MainLayout() {
       );
     }
 
+    if (['admin', 'director'].includes(role)) {
+      items.push({ label: 'teachers', path: '/teachers' });
+    }
+
+    if (['admin', 'director', 'teacher'].includes(role)) {
+      items.push(
+        { label: 'subjects', path: '/subjects' },
+        { label: 'teacherAssignments', path: '/teacher-assignments' },
+        { label: 'timetable', path: '/timetable' },
+      );
+    }
+
+    if (role === 'admin') items.push({ label: 'timetableSettings', path: '/timetable/settings' });
+    if (role === 'teacher') items.push({ label: 'myTeacherProfile', path: '/teacher/profile' });
     if (role === 'student') items.push({ label: 'studentProfile', path: '/student/profile' });
     if (role === 'parent') items.push({ label: 'linkedStudents', path: '/parent/children' });
 
