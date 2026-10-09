@@ -23,7 +23,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 
 const drawerWidth = 240;
 
@@ -42,6 +42,17 @@ function MainLayout() {
     if (role === 'admin') {
       items.push({ label: 'userManagement', path: '/admin/users' });
     }
+
+    if (['admin', 'registrar', 'director'].includes(role)) {
+      items.push(
+        { label: 'students', path: '/students' },
+        { label: 'classes', path: '/classes' },
+        { label: 'parents', path: '/parents' },
+      );
+    }
+
+    if (role === 'student') items.push({ label: 'studentProfile', path: '/student/profile' });
+    if (role === 'parent') items.push({ label: 'linkedStudents', path: '/parent/children' });
 
     return items;
   }, [role]);

@@ -15,8 +15,19 @@ import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 import LoadingScreen from '../components/common/LoadingScreen';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { getDashboardPathForRole } from '../utils/auth';
+import StudentsPage, {
+  MyStudentProfilePage,
+  ParentChildrenPage,
+  StudentFormPage,
+  StudentProfilePage,
+} from '../pages/students/StudentsPages';
+import ClassesPage, {
+  ClassDetailsPage,
+  ParentDetailsPage,
+  ParentsPage,
+} from '../pages/management/ClassesParentsPages';
 
 function RootRedirect() {
   const { isAuthenticated, role, loading } = useAuth();
@@ -53,6 +64,54 @@ function AppRoutes() {
           <Route
             path="/admin/users"
             element={<RoleRoute allowedRoles={['admin']}><UserManagementPage /></RoleRoute>}
+          />
+          <Route
+            path="/students"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><StudentsPage /></RoleRoute>}
+          />
+          <Route
+            path="/students/new"
+            element={<RoleRoute allowedRoles={['admin', 'registrar']}><StudentFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/students/:studentId/edit"
+            element={<RoleRoute allowedRoles={['admin', 'registrar']}><StudentFormPage /></RoleRoute>}
+          />
+          <Route
+            path="/students/:studentId"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><StudentProfilePage /></RoleRoute>}
+          />
+          <Route
+            path="/classes"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><ClassesPage /></RoleRoute>}
+          />
+          <Route
+            path="/classes/:classId"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><ClassDetailsPage /></RoleRoute>}
+          />
+          <Route
+            path="/classes/:classId/edit"
+            element={<RoleRoute allowedRoles={['admin', 'registrar']}><ClassesPage /></RoleRoute>}
+          />
+          <Route
+            path="/parents"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><ParentsPage /></RoleRoute>}
+          />
+          <Route
+            path="/parents/:parentId"
+            element={<RoleRoute allowedRoles={['admin', 'registrar', 'director']}><ParentDetailsPage /></RoleRoute>}
+          />
+          <Route
+            path="/parents/:parentId/edit"
+            element={<RoleRoute allowedRoles={['admin', 'registrar']}><ParentsPage /></RoleRoute>}
+          />
+          <Route
+            path="/student/profile"
+            element={<RoleRoute allowedRoles={['student']}><MyStudentProfilePage /></RoleRoute>}
+          />
+          <Route
+            path="/parent/children"
+            element={<RoleRoute allowedRoles={['parent']}><ParentChildrenPage /></RoleRoute>}
           />
 
           <Route

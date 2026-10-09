@@ -2,7 +2,7 @@ import { Button, Paper, Stack, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 
 function RegistrarDashboard() {
   const { user, logout, role } = useAuth();

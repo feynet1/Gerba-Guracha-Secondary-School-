@@ -4,7 +4,7 @@ The frontend is a React + Vite single-page application deployed on Vercel. Fireb
 
 ## Prerequisites
 
-- Node.js 20 LTS or newer
+- Node.js 22 LTS or newer (the deployed Cloud Functions runtime and installed Admin SDK require Node 22)
 - npm 10 or newer
 - Firebase CLI for Firebase backend services
 - A Firebase project with Authentication, Firestore, and Cloud Functions enabled
@@ -50,7 +50,25 @@ VITE_FIREBASE_APP_ID
 
 ## Initial Admin Bootstrap
 
-Phase 1 requires an authorized admin account before admin-only functions can be used. Create the initial admin only from a trusted environment with Firebase Admin SDK or a one-time server-side process. Do not create a public endpoint for admin bootstrap or commit service-account credentials.
+The first app administrator must be set up once from a trusted computer. This is separate from Firebase Console project ownership and is not a public frontend page.
+
+1. In Firebase Console, enable **Authentication → Sign-in method → Email/Password**.
+2. Under **Authentication → Users**, create the account to promote.
+3. Install the Google Cloud CLI and authenticate with an account that has Firebase Authentication and Firestore administrative permissions:
+   ```powershell
+   gcloud auth application-default login
+   gcloud config set project gerba-guracha-secondary-school
+   ```
+4. From the `functions` folder, run the bootstrap script with the account's email:
+   ```powershell
+   cd "C:\Intel\PROJECT WEB-BASED\SCHOOL MANAGEMENT SYSTEM\functions"
+   npm install
+   node .\bootstrap-admin.cjs account@example.com
+   ```
+
+The script assigns the Firebase Custom Claim `role: admin` and creates or updates `users/{uid}`. It refuses to promote another account if an admin already exists, and refuses to replace a different existing role. It never handles or stores the account password. After success, sign in again so Firebase refreshes the ID token and the app can read the new claim.
+
+Do not expose a public endpoint for first-admin setup or commit service-account credentials. The script is safe to keep in the repository because it contains no credentials and requires private Application Default Credentials on the machine running it.
 
 ## Roles and Authentication
 
@@ -114,13 +132,73 @@ Implemented functions:
 - `healthCheck`
 - `createUser`
 - `setUserRole`
+- Phase 2 student, parent, guardian, and class callables (listed below)
 
-The administrative callable functions require an authenticated caller with the `admin` custom claim and validate requested roles.
+User administration requires the `admin` custom claim. Phase 2 mutations require the `admin` or `registrar` claim; read callables require `admin`, `registrar`, or `director`. Student and parent self-service callable reads verify the corresponding role and account-to-record link.
 
 ## Firestore Security
 
-Firestore rules deny access by default and provide narrowly scoped access to `users/{uid}`. A profile role field is informational; custom claims are authoritative. Clients cannot change their own role.
+Firestore rules use verified custom claims and deny direct client writes to `students`, `parents`, `classes`, admission-number locks, class-key locks, and account-link locks. Admin SDK callable functions perform authorized writes. Admin, registrar, and director can read school records; linked students and parents use narrowly scoped callable profile reads instead of broad collection reads. Teachers have no Phase 2 student access because teacher-to-class assignments do not exist yet. The `users/{uid}` document is informational; custom claims are authoritative, and clients cannot change role claims.
+
+## Phase 2 Student, Parent, and Class Management
+
+### Firestore model
+
+- `students/{studentId}` contains an immutable `admissionNumber`, name fields, `gender`, optional Firestore `dateOfBirth`, `grade`, `classId`, `sectionId`, display `section`, controlled `stream` (`natural`, `social`, or `null`), `parentIds`, contact fields, `enrollmentYear`, `status`, and audit fields (`createdAt`, `createdBy`, `updatedAt`, `updatedBy`). Search-only lowercase name/admission fields support prefix search.
+- `parents/{parentId}` contains names, controlled `relationship`, contact details, optional `userId`, `studentIds`, `status`, and audit fields.
+- `classes/{classId}` contains derived `name`, `grade`, `section`, controlled `stream`, `academicYear`, `capacity`, `active`, transactional active `studentCount` and total `assignedStudentCount`, and audit fields.
+- `admissionNumbers/{sha256}` is a server-only uniqueness lock pointing to a student ID. It prevents duplicate admission numbers under concurrent registration.
+- `classKeys/{sha256}` is a server-only uniqueness lock for grade/section/stream/academic-year combinations.
+- `accountLinks/{uid}` is a server-only link lock preventing one Auth account from linking to multiple student/parent records.
+
+Grades 9 and 10 require a null stream. Grades 11 and 12 require `natural` or `social`. Class capacity is enforced transactionally for active students. Deactivation frees capacity; reactivation checks capacity again. Records are deactivated rather than physically deleted.
+
+### Routes
+
+- `/students`, `/students/new`, `/students/:studentId`, `/students/:studentId/edit`
+- `/classes`, `/classes/:classId`, `/classes/:classId/edit`
+- `/parents`, `/parents/:parentId`, `/parents/:parentId/edit`
+- `/student/profile` (the linked student's own limited profile)
+- `/parent/children` (only children linked to the signed-in parent)
+
+Admin and registrar can manage records. Director access is read-only. Students and parents have only their linked profile views. Search is prefix-based for admission number and names; student results support grade, section, stream, gender, and status filters, with bounded pages. Parent records are paginated; class selection and class lists are capped.
+
+### Cloud Functions
+
+- `createStudent`, `updateStudent`, `assignStudentToClass`, `updateStudentStatus`, `listStudents`, `getStudent`
+- `createParent`, `updateParent`, `getParent`, `linkParentToStudent`, `linkParentAccount`, `getMyLinkedStudents`
+- `createClass`, `updateClass`, `getClass`
+- `linkStudentAccount`, `getMyStudentProfile`
+
+The functions derive actor IDs from the verified callable context, validate controlled values and references, maintain both sides of parent/student links in transactions, and do not trust client audit fields. Parent/student account linking is explicit; parent Auth accounts are not created automatically.
+
+### Indexes and deployment
+
+`firestore.indexes.json` includes the composite indexes used for student grade/status pagination, class roster ordering, class listing, and active-parent ordering. Deploy the backend and rules before using the new routes:
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes,functions
+```
+
+No new frontend environment variables or private credentials are required. The existing six `VITE_FIREBASE_*` variables remain the only frontend configuration.
+
+### Permissions
+
+| Role | Student/class/parent list and profile | Create/edit/assign/archive |
+|---|---|---|
+| Admin | All records | All Phase 2 operations |
+| Registrar | All records | All Phase 2 operations |
+| Director | Read-only | None |
+| Teacher | No Phase 2 access until class assignment exists | None |
+| Student | Own linked limited profile | None |
+| Parent | Linked children only | None |
+
+### Verification and remaining work
+
+The Phase 2 UI uses English and Afaan Oromo translations and responsive Material UI forms/lists. Run `npm.cmd run build`, `npm.cmd run lint`, and `npm.cmd test` on Windows PowerShell systems where script execution policy blocks the `npm.ps1` shim. Firebase Emulator integration/security tests still need to be run against a configured emulator/project before production data is used.
+
+Not included in Phase 2: attendance, teacher-to-class assignment, subjects, timetables, marks/results, reporting, SMS, and Ethiopian calendar conversion. Teacher assignments and academic activities are planned for Phase 3.
 
 ## Phase 1 Scope
 
-This project includes authentication, role assignment, protected routes, and basic admin user administration. It does not implement student management, classes, attendance, results, SMS, or reports.
+Phase 1 provides authentication, role assignment, protected routes, and admin user administration. Phase 2 adds student, parent, and class management. Attendance, results, SMS, and reports remain out of scope.

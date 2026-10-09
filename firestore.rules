@@ -5,29 +5,61 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasRole(roles) {
+      return isAuthenticated() && request.auth.token.role in roles;
+    }
+
     function isAdmin() {
-      return isAuthenticated() && request.auth.token.role == 'admin';
+      return hasRole(['admin']);
+    }
+
+    function canReadSchoolRecords() {
+      return hasRole(['admin', 'registrar', 'director']);
     }
 
     function isOwner(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
-    function isValidUserProfile() {
-      return request.resource.data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt'])
-        && request.resource.data.uid is string
-        && request.resource.data.email is string
-        && request.resource.data.displayName is string
-        && request.resource.data.role in ['admin', 'director', 'teacher', 'registrar', 'student', 'parent']
-        && request.resource.data.active is bool;
+    match /users/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if false;
+      allow update: if isOwner(uid)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+      allow delete: if false;
     }
 
-    match /users/{uid} {
-      allow get: if isAuthenticated() && (isOwner(uid) || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isAdmin() && uid == request.resource.data.uid && isValidUserProfile();
-      allow update: if isAdmin() || (isOwner(uid) && request.resource.data.role == resource.data.role && request.resource.data.uid == uid);
-      allow delete: if isAdmin();
+    match /students/{studentId} {
+      allow get: if canReadSchoolRecords();
+      allow list: if canReadSchoolRecords();
+      allow create, update, delete: if false;
+    }
+
+    match /parents/{parentId} {
+      allow get: if canReadSchoolRecords()
+        || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow list: if canReadSchoolRecords();
+      allow create, update, delete: if false;
+    }
+
+    match /classes/{classId} {
+      allow read: if canReadSchoolRecords();
+      allow create, update, delete: if false;
+    }
+
+    match /admissionNumbers/{admissionId} {
+      allow read, write: if false;
+    }
+
+    match /classKeys/{classKey} {
+      allow read, write: if false;
+    }
+
+    match /accountLinks/{userId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

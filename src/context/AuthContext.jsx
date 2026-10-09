@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -8,18 +8,15 @@ import {
 
 import { auth } from '../services/firebase/config';
 
-const AuthContext = createContext(null);
+import { AuthContext } from './auth-context';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(auth));
 
   useEffect(() => {
     if (!auth) {
-      setUser(null);
-      setRole(null);
-      setLoading(false);
       return undefined;
     }
 
@@ -35,7 +32,8 @@ export function AuthProvider({ children }) {
         const tokenResult = await nextUser.getIdTokenResult();
         setUser(nextUser);
         setRole(tokenResult.claims.role || null);
-      } catch (error) {
+      } catch (tokenError) {
+        console.error('Unable to load authentication claims.', tokenError);
         setUser(nextUser);
         setRole(null);
       } finally {
@@ -101,14 +99,4 @@ export function AuthProvider({ children }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-
-  if (!context) {
-    throw new Error('useAuth must be used inside AuthProvider.');
-  }
-
-  return context;
 }

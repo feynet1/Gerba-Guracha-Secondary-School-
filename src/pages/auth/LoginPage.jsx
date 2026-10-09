@@ -22,7 +22,7 @@ import { useEffect, useState } from 'react';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import { getDashboardPathForRole } from '../../utils/auth';
 
 function LoginPage() {
