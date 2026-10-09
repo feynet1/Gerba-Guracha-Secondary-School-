@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulator": "vite --mode emulator",
+    "emulators": "set \"FUNCTIONS_DISCOVERY_TIMEOUT=60\" && set \"PATH=%APPDATA%\\npm;%PATH%\" && npm exec --yes --package=node@22 -- firebase emulators:start --only auth,firestore,functions --project demo-phase3",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",

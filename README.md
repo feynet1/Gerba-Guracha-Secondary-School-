@@ -97,7 +97,38 @@ npm run build
 npm run preview
 ```
 
-Firebase Emulators may be started with `firebase emulators:start` after the emulator suite has been configured for the project.
+### Free local Firebase Emulator development
+
+Cloud Functions cannot be deployed to the Spark plan, but you can run the app's Auth, Firestore, and callable Functions locally without upgrading. Emulator data is local to your computer and does not appear in the live Firebase project.
+
+1. Ensure the normal Firebase web-app settings are present in `.env` or `.env.local`. Emulator mode overrides the project ID to `demo-phase3` and only connects services to localhost.
+2. In a terminal at the repository root, start Auth, Firestore, Functions, and the Emulator UI:
+
+   ```powershell
+   $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot'
+   $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+   npm.cmd run emulators
+   ```
+
+   Java must be installed; adjust `JAVA_HOME` if its installation path differs. The script uses Node 22 for the Functions emulator (downloading the runtime through npm on first use if needed) and allows extra time for initial Functions discovery. Emulator data is temporary unless explicitly exported.
+3. In another PowerShell terminal, create a local-only administrator (choose a password for emulator testing):
+
+   ```powershell
+   $env:LOCAL_ADMIN_PASSWORD = 'ChooseYourOwnLocalPassword'
+   node .\functions\bootstrap-emulator-admin.cjs feymesay@gmail.com
+   Remove-Item Env:LOCAL_ADMIN_PASSWORD
+   ```
+
+   This helper is hard-wired to the demo project and local Auth/Firestore emulators; it does not use production credentials or contact the live project.
+4. In a third terminal, run the Vite app in emulator mode:
+
+   ```powershell
+   npm.cmd run dev:emulator
+   ```
+
+5. Sign in using the local admin email and password. Emulator UI is available at `http://127.0.0.1:4000`.
+
+Normal `npm run dev` mode is unchanged. Only `npm run dev:emulator` enables emulator connections, and only in Vite development mode. The browser connects to Auth `9099`, Firestore `8080`, and Functions `5001`.
 
 ## GitHub to Vercel Deployment
 
