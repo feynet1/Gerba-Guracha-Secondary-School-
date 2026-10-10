@@ -1,16 +1,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAuthenticated() {
+    function signedIn() {
       return request.auth != null;
     }
 
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
     function hasRole(roles) {
-      return isAuthenticated() && request.auth.token.role in roles;
+      return signedIn()
+        && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.active == true
+        && get(userPath(request.auth.uid)).data.role in roles;
+    }
+
+    function migrationReady() {
+      let path = /databases/$(database)/documents/systemConfig/sparkMigration;
+      return exists(path) && get(path).data.ready == true;
     }
 
     function isAdmin() {
-      return hasRole(['admin']);
+      return hasRole(['admin']) && migrationReady();
+    }
+
+    function isStaff() {
+      return hasRole(['admin', 'registrar']) && migrationReady();
     }
 
     function canReadSchoolRecords() {
@@ -25,106 +41,520 @@ service cloud.firestore {
       return hasRole(['teacher']);
     }
 
-    function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid;
+    function validRole(role) {
+      return role in ['admin', 'director', 'teacher', 'registrar', 'student', 'parent'];
+    }
+
+    function classIdentity(data) {
+      return string(data.grade) + '_' + data.section + '_'
+        + (data.stream == null ? 'none' : data.stream) + '_' + data.academicYear;
+    }
+
+    function validUserProfile(uid) {
+      return request.resource.data.keys().hasAll([
+          'uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt',
+          'createdBy', 'photoURL'
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 100
+        && validRole(request.resource.data.role)
+        && request.resource.data.active is bool;
+    }
+
+    function validClass() {
+      return request.resource.data.keys().hasAll([
+          'grade', 'stream', 'section', 'academicYear', 'capacity', 'name', 'active',
+          'studentCount', 'assignedStudentCount', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'grade', 'stream', 'section', 'academicYear', 'capacity', 'name', 'active',
+          'studentCount', 'assignedStudentCount', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.grade in [9, 10, 11, 12]
+        && request.resource.data.section is string
+        && request.resource.data.section.matches('^[A-Z0-9_-]{1,20}$')
+        && request.resource.data.academicYear is string
+        && request.resource.data.academicYear.matches('^[A-Za-z0-9_-]{1,20}$')
+        && request.resource.data.capacity is int
+        && request.resource.data.capacity >= 1
+        && request.resource.data.capacity <= 500
+        && request.resource.data.active is bool
+        && request.resource.data.studentCount is int
+        && request.resource.data.assignedStudentCount is int
+        && ((request.resource.data.grade in [9, 10] && request.resource.data.stream == null)
+          || (request.resource.data.grade in [11, 12] && request.resource.data.stream in ['natural', 'social']));
+    }
+
+    function validStudent() {
+      return request.resource.data.keys().hasAll([
+          'admissionNumber', 'searchAdmissionNumber', 'firstName', 'middleName', 'lastName',
+          'gender', 'grade', 'classId', 'sectionId', 'section', 'stream', 'parentIds',
+          'status', 'userId', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'admissionNumber', 'searchAdmissionNumber', 'firstName', 'middleName', 'lastName',
+          'searchFirstName', 'searchMiddleName', 'searchLastName', 'gender', 'dateOfBirth',
+          'grade', 'classId', 'sectionId', 'section', 'stream', 'parentIds', 'phone',
+          'address', 'enrollmentYear', 'status', 'photoUrl', 'userId',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.admissionNumber is string
+        && request.resource.data.admissionNumber.matches('^[A-Z0-9_-]{2,40}$')
+        && request.resource.data.firstName is string
+        && request.resource.data.firstName.size() > 0
+        && request.resource.data.firstName.size() <= 100
+        && request.resource.data.lastName is string
+        && request.resource.data.lastName.size() > 0
+        && request.resource.data.lastName.size() <= 100
+        && request.resource.data.gender in ['male', 'female']
+        && request.resource.data.grade in [9, 10, 11, 12]
+        && request.resource.data.classId is string
+        && request.resource.data.sectionId is string
+        && request.resource.data.parentIds is list
+        && request.resource.data.parentIds.size() <= 10
+        && request.resource.data.status in ['active', 'inactive']
+        && (request.resource.data.userId == null || request.resource.data.userId is string)
+        && (request.resource.data.dateOfBirth == null || request.resource.data.dateOfBirth is timestamp)
+        && (request.resource.data.phone == null || request.resource.data.phone is string)
+        && (request.resource.data.address == null || request.resource.data.address is string)
+        && (request.resource.data.stream == null || request.resource.data.stream in ['natural', 'social']);
+    }
+
+    function studentMatchesClass(data) {
+      let classPath = /databases/$(database)/documents/classes/$(data.classId);
+      return existsAfter(classPath)
+        && getAfter(classPath).data.grade == data.grade
+        && getAfter(classPath).data.section == data.section
+        && getAfter(classPath).data.stream == data.stream
+        && data.sectionId == data.classId;
+    }
+
+    function isTeacherAccountLinkedTo(teacherId) {
+      return isTeacher()
+        && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
+        && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId == teacherId;
+    }
+
+    function isParentLinkedToStudent(studentId) {
+      let accountPath = /databases/$(database)/documents/accountLinks/$(request.auth.uid);
+      let parentPath = /databases/$(database)/documents/parents/$(get(accountPath).data.recordId);
+      let studentPath = /databases/$(database)/documents/students/$(studentId);
+      return hasRole(['parent'])
+        && exists(accountPath)
+        && get(accountPath).data.type == 'parent'
+        && exists(parentPath)
+        && get(parentPath).data.studentIds.hasAny([studentId])
+        && exists(studentPath)
+        && get(studentPath).data.parentIds.hasAny([get(accountPath).data.recordId]);
+    }
+
+    function timetableLockId(resourceType, resourceId, entry) {
+      return resourceType + '__' + resourceId + '__' + entry.academicYear + '__'
+        + entry.dayOfWeek + '__' + entry.periodId;
+    }
+
+    function lockMatchesEntry(lock, entryId, entry) {
+      return lock.entryId == entryId
+        && lock.academicYear == entry.academicYear
+        && lock.dayOfWeek == entry.dayOfWeek
+        && lock.periodId == entry.periodId
+        && ((lock.resourceType == 'class' && lock.resourceId == entry.classId)
+          || (lock.resourceType == 'teacher' && lock.resourceId == entry.teacherId)
+          || (lock.resourceType == 'room' && lock.resourceId == entry.room));
+    }
+
+    function hasTimetableLock(resourceType, resourceId, entryId, entry) {
+      let path = /databases/$(database)/documents/timetableSlotLocks/$(timetableLockId(resourceType, resourceId, entry));
+      return existsAfter(path)
+        && getAfter(path).data.entryId == entryId
+        && getAfter(path).data.resourceType == resourceType
+        && getAfter(path).data.resourceId == resourceId;
+    }
+
+    function timetableLockReleased(resourceType, resourceId, entry) {
+      let path = /databases/$(database)/documents/timetableSlotLocks/$(timetableLockId(resourceType, resourceId, entry));
+      return !existsAfter(path);
+    }
+
+    function validTimetableEntry(data) {
+      let settingsPath = /databases/$(database)/documents/schoolSettings/timetable;
+      let assignmentPath = /databases/$(database)/documents/teacherAssignments/$(data.assignmentId);
+      let classPath = /databases/$(database)/documents/classes/$(data.classId);
+      let teacherPath = /databases/$(database)/documents/teachers/$(data.teacherId);
+      let subjectPath = /databases/$(database)/documents/subjects/$(data.subjectId);
+      return data.keys().hasAll([
+          'classId', 'teacherId', 'subjectId', 'assignmentId', 'academicYear',
+          'dayOfWeek', 'periodId', 'startTime', 'endTime', 'active'
+        ])
+        && data.keys().hasOnly([
+          'classId', 'teacherId', 'subjectId', 'assignmentId', 'academicYear',
+          'dayOfWeek', 'periodId', 'startTime', 'endTime', 'room', 'active',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && data.classId is string
+        && data.teacherId is string
+        && data.subjectId is string
+        && data.assignmentId is string
+        && data.academicYear is string
+        && data.dayOfWeek in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        && data.periodId is string
+        && data.startTime is string
+        && data.endTime is string
+        && data.active is bool
+        && (data.room == null || data.room is string)
+        && existsAfter(settingsPath)
+        && getAfter(settingsPath).data.academicYear == data.academicYear
+        && getAfter(settingsPath).data.schoolDays.hasAny([data.dayOfWeek])
+        && getAfter(settingsPath).data.periodsById[data.periodId].type == 'lesson'
+        && getAfter(settingsPath).data.periodsById[data.periodId].startTime == data.startTime
+        && getAfter(settingsPath).data.periodsById[data.periodId].endTime == data.endTime
+        && (getAfter(settingsPath).data.roomAllocationEnabled
+          ? data.room is string && getAfter(settingsPath).data.rooms.hasAny([data.room])
+          : data.room == null)
+        && existsAfter(assignmentPath)
+        && getAfter(assignmentPath).data.active == true
+        && getAfter(assignmentPath).data.teacherId == data.teacherId
+        && getAfter(assignmentPath).data.classId == data.classId
+        && getAfter(assignmentPath).data.subjectId == data.subjectId
+        && getAfter(assignmentPath).data.academicYear == data.academicYear
+        && existsAfter(classPath)
+        && getAfter(classPath).data.active == true
+        && existsAfter(teacherPath)
+        && getAfter(teacherPath).data.employmentStatus == 'active'
+        && existsAfter(subjectPath)
+        && getAfter(subjectPath).data.active == true;
     }
 
     match /users/{uid} {
-      allow get: if isOwner(uid) || isAdmin();
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
-      allow create: if false;
-      allow update: if isOwner(uid)
+      allow create: if isAdmin()
+        && uid != request.auth.uid
+        && validUserProfile(uid)
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin()
+          && uid != request.auth.uid
+          && validUserProfile(uid)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.createdBy == resource.data.createdBy
+        || (signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt'])
+          && request.resource.data.uid == resource.data.uid
           && request.resource.data.role == resource.data.role
-          && request.resource.data.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
-      allow delete: if false;
-    }
-
-    match /students/{studentId} {
-      allow get: if canReadSchoolRecords();
-      allow list: if canReadSchoolRecords();
-      allow create, update, delete: if false;
-    }
-
-    match /parents/{parentId} {
-      allow get: if canReadSchoolRecords()
-        || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow list: if canReadSchoolRecords();
-      allow create, update, delete: if false;
+          && request.resource.data.active == resource.data.active);
+      allow delete: if isAdmin() && uid != request.auth.uid;
     }
 
     match /classes/{classId} {
       allow read: if canReadSchoolRecords();
-      allow create, update, delete: if false;
+      allow create: if isStaff()
+        && validClass()
+        && getAfter(/databases/$(database)/documents/classKeys/$(classIdentity(request.resource.data))).data.classId == classId;
+      allow update: if isStaff()
+        && validClass()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'capacity', 'active', 'studentCount', 'assignedStudentCount', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if false;
     }
 
-    match /admissionNumbers/{admissionId} {
-      allow read, write: if false;
+    match /classKeys/{key} {
+      allow get: if isStaff();
+      allow list: if false;
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly([
+          'classId', 'grade', 'stream', 'section', 'academicYear', 'capacity', 'name', 'active'
+        ])
+        && key == classIdentity(request.resource.data)
+        && getAfter(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.grade == request.resource.data.grade
+        && getAfter(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.section == request.resource.data.section
+        && getAfter(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.academicYear == request.resource.data.academicYear;
+      allow update: if false;
+      allow delete: if isStaff()
+        && resource.data.classId is string
+        && classIdentity(get(/databases/$(database)/documents/classes/$(resource.data.classId)).data) == key
+        && classIdentity(getAfter(/databases/$(database)/documents/classes/$(resource.data.classId)).data) != key;
     }
 
-    match /classKeys/{classKey} {
-      allow read, write: if false;
+    match /admissionNumbers/{admissionNumber} {
+      allow get: if isStaff();
+      allow list: if false;
+      allow create: if isStaff()
+        && admissionNumber.matches('^[A-Z0-9_-]{2,40}$')
+        && request.resource.data.keys().hasOnly(['studentId', 'admissionNumber'])
+        && request.resource.data.admissionNumber == admissionNumber
+        && getAfter(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.admissionNumber == admissionNumber;
+      allow update, delete: if false;
+    }
+
+    match /students/{studentId} {
+      allow get: if hasRole(['admin', 'registrar'])
+        || (isTeacher() && resource.data.userId == request.auth.uid)
+        || (hasRole(['student']) && resource.data.userId == request.auth.uid)
+        || isParentLinkedToStudent(studentId);
+      allow list: if hasRole(['admin', 'registrar'])
+        || ((isTeacher() || hasRole(['student'])) && resource.data.userId == request.auth.uid)
+        || isParentLinkedToStudent(studentId);
+      allow create: if isStaff()
+        && validStudent()
+        && request.resource.data.userId == null
+        && studentMatchesClass(request.resource.data)
+        && getAfter(/databases/$(database)/documents/admissionNumbers/$(request.resource.data.admissionNumber)).data.studentId == studentId;
+      allow update: if isStaff()
+        && validStudent()
+        && studentMatchesClass(request.resource.data)
+        && request.resource.data.admissionNumber == resource.data.admissionNumber
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if false;
+    }
+
+    match /parents/{parentId} {
+      allow get, list: if hasRole(['admin', 'registrar'])
+        || (hasRole(['parent']) && resource.data.userId == request.auth.uid);
+      allow create: if isStaff()
+        && request.resource.data.keys().hasAll([
+          'firstName', 'lastName', 'relationship', 'phone', 'status', 'studentIds',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'firstName', 'middleName', 'lastName', 'relationship', 'phone', 'alternatePhone',
+          'email', 'address', 'userId', 'studentIds', 'status', 'createdAt', 'createdBy',
+          'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.relationship in ['father', 'mother', 'guardian', 'other']
+        && request.resource.data.phone is string
+        && request.resource.data.status == 'active'
+        && request.resource.data.studentIds is list
+        && request.resource.data.userId == null;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firstName', 'middleName', 'lastName', 'relationship', 'phone', 'alternatePhone',
+          'email', 'address', 'status', 'studentIds', 'userId', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.relationship in ['father', 'mother', 'guardian', 'other']
+        && request.resource.data.phone is string
+        && request.resource.data.status in ['active', 'inactive']
+        && (isAdmin() || request.resource.data.userId == resource.data.userId);
+      allow delete: if false;
     }
 
     match /accountLinks/{userId} {
-      allow read, write: if false;
+      allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if false;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['type', 'recordId'])
+        && request.resource.data.type in ['teacher', 'student', 'parent']
+        && request.resource.data.recordId is string;
+      allow delete: if isAdmin();
     }
 
     match /teachers/{teacherId} {
-      allow get: if canReadPhase3Administration()
-        || (isTeacher() && resource.data.userId == request.auth.uid);
-      allow list: if canReadPhase3Administration();
-      allow create, update, delete: if false;
+      allow get: if isAdmin() || isTeacherAccountLinkedTo(teacherId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && (request.method == 'create'
+          ? getAfter(/databases/$(database)/documents/employeeIds/$(request.resource.data.employeeId)).data.teacherId == teacherId
+          : request.resource.data.employeeId == resource.data.employeeId
+            || getAfter(/databases/$(database)/documents/employeeIds/$(request.resource.data.employeeId)).data.teacherId == teacherId)
+        && request.resource.data.keys().hasAll([
+          'employeeId', 'firstName', 'lastName', 'employmentStatus', 'specialization',
+          'userId', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'employeeId', 'firstName', 'middleName', 'lastName', 'gender', 'phone', 'email',
+          'qualification', 'specialization', 'employmentStatus', 'userId', 'assignedClassIds',
+          'searchEmployeeId', 'searchFirstName', 'searchLastName', 'searchEmail',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.employeeId is string
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.employmentStatus in ['active', 'inactive']
+        && request.resource.data.specialization is list;
+      allow delete: if false;
+    }
+
+    match /employeeIds/{employeeId} {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create: if isAdmin()
+        && employeeId.matches('^[A-Z0-9][A-Z0-9_-]{1,39}$')
+        && request.resource.data.keys().hasOnly(['teacherId'])
+        && getAfter(/databases/$(database)/documents/teachers/$(request.resource.data.teacherId)).data.employeeId == employeeId;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     match /subjects/{subjectId} {
       allow read: if hasRole(['admin', 'director', 'teacher']);
-      allow create, update, delete: if false;
+      allow create, update: if isAdmin()
+        && (request.method == 'create'
+          ? getAfter(/databases/$(database)/documents/subjectCodes/$(request.resource.data.code)).data.subjectId == subjectId
+          : request.resource.data.code == resource.data.code
+            || getAfter(/databases/$(database)/documents/subjectCodes/$(request.resource.data.code)).data.subjectId == subjectId)
+        && request.resource.data.keys().hasAll([
+          'code', 'name', 'applicableGrades', 'applicableStreams', 'periodsPerWeek', 'active'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'code', 'name', 'description', 'applicableGrades', 'applicableStreams',
+          'periodsPerWeek', 'active', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.code is string
+        && request.resource.data.name is string
+        && request.resource.data.applicableGrades is list
+        && request.resource.data.applicableStreams is list
+        && request.resource.data.periodsPerWeek is int
+        && request.resource.data.periodsPerWeek >= 1
+        && request.resource.data.periodsPerWeek <= 40
+        && request.resource.data.active is bool;
+      allow delete: if false;
+    }
+
+    match /subjectCodes/{code} {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create: if isAdmin()
+        && code.matches('^[A-Z0-9][A-Z0-9_-]{1,19}$')
+        && request.resource.data.keys().hasOnly(['subjectId'])
+        && getAfter(/databases/$(database)/documents/subjects/$(request.resource.data.subjectId)).data.code == code;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     match /teacherAssignments/{assignmentId} {
-      allow get: if canReadPhase3Administration()
-        || (isTeacher()
-          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
-          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
-      allow list: if canReadPhase3Administration()
-        || (isTeacher()
-          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
-          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
-      allow create, update, delete: if false;
+      allow get, list: if isAdmin()
+        || (isTeacherAccountLinkedTo(resource.data.teacherId));
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll([
+          'teacherId', 'classId', 'subjectId', 'academicYear', 'periodsPerWeek', 'active'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'teacherId', 'classId', 'subjectId', 'academicYear', 'periodsPerWeek',
+          'active', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.teacherId is string
+        && request.resource.data.classId is string
+        && request.resource.data.subjectId is string
+        && request.resource.data.periodsPerWeek is int
+        && request.resource.data.periodsPerWeek >= 1
+        && request.resource.data.active is bool;
+      allow delete: if false;
+    }
+
+    match /teacherAssignmentKeys/{key} {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['assignmentId'])
+        && request.resource.data.assignmentId is string
+        && getAfter(/databases/$(database)/documents/teacherAssignments/$(request.resource.data.assignmentId)).data.active == true
+        && key == getAfter(/databases/$(database)/documents/teacherAssignments/$(request.resource.data.assignmentId)).data.teacherId
+          + '__' + getAfter(/databases/$(database)/documents/teacherAssignments/$(request.resource.data.assignmentId)).data.classId
+          + '__' + getAfter(/databases/$(database)/documents/teacherAssignments/$(request.resource.data.assignmentId)).data.subjectId
+          + '__' + getAfter(/databases/$(database)/documents/teacherAssignments/$(request.resource.data.assignmentId)).data.academicYear;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     match /timetable/{entryId} {
-      allow get, list: if canReadPhase3Administration()
-        || (isTeacher()
-          && get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.type == 'teacher'
-          && resource.data.teacherId == get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.recordId);
-      allow create, update, delete: if false;
+      allow get, list: if canReadPhase3Administration() || isTeacherAccountLinkedTo(resource.data.teacherId);
+      allow create: if isAdmin()
+        && validTimetableEntry(request.resource.data)
+        && request.resource.data.active == true
+        && hasTimetableLock('class', request.resource.data.classId, entryId, request.resource.data)
+        && hasTimetableLock('teacher', request.resource.data.teacherId, entryId, request.resource.data)
+        && (request.resource.data.room == null
+          || hasTimetableLock('room', request.resource.data.room, entryId, request.resource.data));
+      allow update: if isAdmin()
+        && validTimetableEntry(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (request.resource.data.active == false
+          ? resource.data.active == true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt', 'updatedBy'])
+            && timetableLockReleased('class', resource.data.classId, resource.data)
+            && timetableLockReleased('teacher', resource.data.teacherId, resource.data)
+            && (resource.data.room == null
+              || timetableLockReleased('room', resource.data.room, resource.data))
+          : hasTimetableLock('class', request.resource.data.classId, entryId, request.resource.data)
+            && hasTimetableLock('teacher', request.resource.data.teacherId, entryId, request.resource.data)
+            && (request.resource.data.room == null
+              || hasTimetableLock('room', request.resource.data.room, entryId, request.resource.data)));
+      allow delete: if false;
+    }
+
+    match /timetableSlotLocks/{lockId} {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'entryId', 'resourceType', 'resourceId', 'academicYear', 'dayOfWeek', 'periodId'
+        ])
+        && lockId == timetableLockId(request.resource.data.resourceType, request.resource.data.resourceId, request.resource.data)
+        && request.resource.data.resourceType in ['class', 'teacher', 'room']
+        && request.resource.data.entryId is string
+        && getAfter(/databases/$(database)/documents/timetable/$(request.resource.data.entryId)).data.active == true
+        && lockMatchesEntry(request.resource.data, request.resource.data.entryId,
+          getAfter(/databases/$(database)/documents/timetable/$(request.resource.data.entryId)).data);
+      allow update: if false;
+      allow delete: if isAdmin()
+        && exists(/databases/$(database)/documents/timetable/$(resource.data.entryId))
+        && (getAfter(/databases/$(database)/documents/timetable/$(resource.data.entryId)).data.active == false
+          || !lockMatchesEntry(resource.data, resource.data.entryId,
+            getAfter(/databases/$(database)/documents/timetable/$(resource.data.entryId)).data));
+    }
+
+    match /assignmentScheduleUsage/{assignmentId} {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['count', 'updatedAt'])
+        && request.resource.data.count is int
+        && request.resource.data.count >= 0;
+      allow delete: if false;
     }
 
     match /schoolSettings/{settingsId} {
       allow read: if hasRole(['admin', 'director', 'teacher']);
-      allow create, update, delete: if false;
-    }
-
-    match /employeeIds/{employeeKey} {
-      allow read, write: if false;
-    }
-
-    match /subjectCodes/{subjectKey} {
-      allow read, write: if false;
-    }
-
-    match /teacherAssignmentKeys/{assignmentKey} {
-      allow read, write: if false;
-    }
-
-    match /timetableSlotLocks/{slotKey} {
-      allow read, write: if false;
-    }
-
-    match /assignmentScheduleUsage/{assignmentId} {
-      allow read, write: if false;
+      allow create: if isAdmin()
+        && settingsId == 'timetable'
+        && request.resource.data.keys().hasAll([
+          'academicYear', 'schoolDays', 'periods', 'periodsById', 'rooms',
+          'roomAllocationEnabled', 'timeZone', 'maxPeriodsPerDay'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'academicYear', 'schoolDays', 'periods', 'periodsById', 'rooms',
+          'roomAllocationEnabled', 'timeZone', 'maxPeriodsPerDay',
+          'activeEntryCount', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.academicYear is string
+        && request.resource.data.schoolDays is list
+        && request.resource.data.periods is list
+        && request.resource.data.periodsById is map
+        && request.resource.data.rooms is list
+        && request.resource.data.roomAllocationEnabled is bool
+        && request.resource.data.timeZone is string;
+      allow update: if isAdmin()
+        && settingsId == 'timetable'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'updatedBy']);
+      allow delete: if false;
     }
 
     match /{document=**} {

@@ -5,53 +5,82 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
-import { auth } from '../services/firebase/config';
+import { auth, db } from '../services/firebase/config';
 
 import { AuthContext } from './auth-context';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(Boolean(auth));
+  const [loading, setLoading] = useState(Boolean(auth && db));
 
   useEffect(() => {
-    if (!auth) {
+    if (!auth || !db) {
       return undefined;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+    let unsubscribeProfile;
+    const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
+      unsubscribeProfile?.();
+      setLoading(true);
+
       if (!nextUser) {
         setUser(null);
+        setProfile(null);
         setRole(null);
         setLoading(false);
         return;
       }
 
-      try {
-        const tokenResult = await nextUser.getIdTokenResult();
-        setUser(nextUser);
-        setRole(tokenResult.claims.role || null);
-      } catch (tokenError) {
-        console.error('Unable to load authentication claims.', tokenError);
-        setUser(nextUser);
-        setRole(null);
-      } finally {
-        setLoading(false);
-      }
+      setUser(nextUser);
+      unsubscribeProfile = onSnapshot(
+        doc(db, 'users', nextUser.uid),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            setProfile(null);
+            setRole(null);
+            setLoading(false);
+            return;
+          }
+
+          const userProfile = snapshot.data();
+          setProfile(userProfile);
+          setRole(userProfile.active === true ? userProfile.role || null : null);
+          setLoading(false);
+        },
+        (profileError) => {
+          console.error('Unable to load the user profile.', profileError);
+          setProfile(null);
+          setRole(null);
+          setLoading(false);
+        },
+      );
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeProfile?.();
+      unsubscribeAuth();
+    };
   }, []);
 
   const refreshRole = async () => {
-    if (!auth || !auth.currentUser) {
+    if (!auth?.currentUser || !db) {
       setRole(null);
       return;
     }
 
-    const tokenResult = await auth.currentUser.getIdTokenResult(true);
-    setRole(tokenResult.claims.role || null);
+    try {
+      const snapshot = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const userProfile = snapshot.exists() ? snapshot.data() : null;
+      setProfile(userProfile);
+      setRole(userProfile?.active === true ? userProfile.role || null : null);
+    } catch (error) {
+      console.error('Unable to refresh the user role.', error);
+      throw error;
+    }
   };
 
   const login = async (email, password) => {
@@ -60,9 +89,7 @@ export function AuthProvider({ children }) {
     }
 
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    const tokenResult = await credential.user.getIdTokenResult();
     setUser(credential.user);
-    setRole(tokenResult.claims.role || null);
     return credential.user;
   };
 
@@ -73,6 +100,7 @@ export function AuthProvider({ children }) {
 
     await signOut(auth);
     setUser(null);
+    setProfile(null);
     setRole(null);
   };
 
@@ -87,15 +115,17 @@ export function AuthProvider({ children }) {
   const value = useMemo(
     () => ({
       user,
+      profile,
       role,
       loading,
       isAuthenticated: Boolean(user),
+      isActive: profile?.active === true,
       login,
       logout,
       resetPassword,
       refreshRole,
     }),
-    [user, role, loading],
+    [user, profile, role, loading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
